@@ -1,6 +1,14 @@
 {
-  "generated_at": "2026-08-25T17:51:43.046235+00:00",
+  "generated_at": "2026-08-25T17:52:47.002519+00:00",
   "modes": {
+    "30d": {
+      "data_available": true,
+      "data_path": "30d.json",
+      "last_attempt_at": "2026-08-25T17:52:47.002519+00:00",
+      "last_error": null,
+      "last_successful_refresh": "2026-08-25T17:52:47.097989+00:00",
+      "status": "healthy"
+    },
     "7d": {
       "data_available": true,
       "data_path": "7d.json",
