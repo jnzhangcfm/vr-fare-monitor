@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VR Adult Fix fare source — Phase 1</title>
+  <style>
+    body { max-width: 980px; margin: 40px auto; padding: 0 24px; font: 16px/1.55 system-ui, sans-serif; color: #17211b; }
+    h1, h2 { line-height: 1.2; }
+    .verdict { padding: 16px 20px; border-left: 5px solid #178647; background: #edf8f1; }
+    code { background: #f2f4f3; padding: 2px 5px; border-radius: 4px; }
+    pre { overflow-x: auto; padding: 14px; background: #f2f4f3; border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; }
+    th, td { padding: 9px 10px; border: 1px solid #cad1cd; text-align: left; vertical-align: top; }
+    th { background: #eef1ef; }
+    .risk { color: #7b341e; }
+  </style>
+</head>
+<body>
+  <h1>VR Adult Fix fare source — Phase 1 technical report</h1>
+  <p>Live investigation date: 2026-08-25 (Europe/Stockholm). Scope: read-only official VR searches between Göteborg C and Stockholm C.</p>
+
+  <section class="verdict">
+    <h2>1. Verdict</h2>
+    <p><strong>Direct API/client feasible.</strong> A fresh headless browser was useful only to derive and verify the request. Routine fare acquisition does not require browser automation, login, cookies, tokens, CAPTCHA handling, or a visible/local browser.</p>
+  </section>
+
+  <h2>2. Evidence</h2>
+  <p>The official booking frontend uses:</p>
+  <pre>POST https://api.vrresa.se/api/v1.0/departures/</pre>
+  <p>Observed Adult one-way request body:</p>
+  <pre>{
+  "origin_id": "&lt;VR station UUID&gt;",
+  "destination_id": "&lt;VR station UUID&gt;",
+  "date": "YYYY-MM-DD",
+  "for_outbound": true,
+  "passengers": [1],
+  "has_stroller": false,
+  "has_pet": false,
+  "wheelchairs": 0,
+  "walkers": 0
+}</pre>
+  <p>The UI's “1 Adult” state generated <code>passengers: [1]</code>. The useful response fields are:</p>
+  <ul>
+    <li><code>[].departures[].schedule_reference</code>: service/train number.</li>
+    <li><code>[].departure_at</code> and <code>[].arrival_at</code>: timezone-aware ISO timestamps; duration can be derived.</li>
+    <li><code>[].prices.FIX</code>: Adult Fix amount for this request. The official Swedish UI renders it as <code>kr</code>, and its analytics identifies the currency as SEK.</li>
+    <li><code>available</code>, <code>bookable</code>, <code>seats_left</code>: sale state.</li>
+    <li><code>has_disruption</code>, <code>had_rebooked_disruption</code>, plus per-service <code>event</code>, <code>messages</code>, <code>transport_type</code>, <code>traffic_provider</code>, and nested <code>legs[].vehicle_types</code>: operational/anomaly information exposed by the API.</li>
+  </ul>
+  <p>HAR requests contained no Authorization, CSRF token, API key, or Cookie on the departures call. A direct replay succeeded after explicitly removing Referer, Accept, User-Agent, and all session state; only JSON Content-Type was retained.</p>
+
+  <h2>3. Reliability</h2>
+  <p>The direct client succeeded for six live searches: both directions on 2026-08-26, 2026-08-27, and 2026-08-31. Four official UI searches were checked: Stockholm→Göteborg on 08-26 and 08-31, and Göteborg→Stockholm on 08-27 and 08-31.</p>
+  <table>
+    <thead><tr><th>Official UI search</th><th>Compared services</th><th>UI Adult Fix</th><th>Client result</th></tr></thead>
+    <tbody>
+      <tr><td>Stockholm→Göteborg, 2026-08-26</td><td>VR 2009 / 2011 / 2003</td><td>729 / unavailable / 1159 SEK</td><td>Exact match</td></tr>
+      <tr><td>Göteborg→Stockholm, 2026-08-27</td><td>VR 2004 / 2006</td><td>579 / 689 SEK</td><td>Exact match</td></tr>
+      <tr><td>Stockholm→Göteborg, 2026-08-31</td><td>VR 2009 / 2011 / 2003</td><td>579 / 619 / 389 SEK</td><td>Exact match</td></tr>
+      <tr><td>Göteborg→Stockholm, 2026-08-31</td><td>VR 2004 / 2006</td><td>729 / 769 SEK</td><td>Exact match</td></tr>
+    </tbody>
+  </table>
+  <p>The sample also confirmed why live discovery is required: VR 2011 existed in the 08-26 and 08-27 timetable but had <code>available=false</code> and no Fix amount; it was available again on 08-31.</p>
+
+  <h2>4. Minimal proposed fare architecture</h2>
+  <ol>
+    <li>Resolve a small controlled station alias to the station UUID observed in VR's official booking URL.</li>
+    <li>Send one low-rate JSON POST per route/date to <code>/api/v1.0/departures/</code>.</li>
+    <li>Return every discovered journey; do not filter by assumed timetable.</li>
+    <li>Normalize train numbers, timestamps, calculated duration, availability, <code>prices.FIX</code> as Adult/SEK, and all exposed anomaly fields.</li>
+  </ol>
+  <pre>vr-fares search --from GOTEBORG --to STOCKHOLM --date YYYY-MM-DD</pre>
+
+  <h2>5. Risks</h2>
+  <ul class="risk">
+    <li>The endpoint is an internal, unversioned frontend API despite the <code>v1.0</code> path; schema, station IDs, and passenger codes may change without notice.</li>
+    <li>No auth/session expiry risk was observed, but VR could add access controls later.</li>
+    <li>No CAPTCHA, throttling, or headless-only blocking was observed at this low rate. Higher-frequency behavior was intentionally not tested.</li>
+    <li>Tests were run from Sweden; geography-dependent CDN, pricing, or controls were not tested.</li>
+    <li>All sampled journeys had <code>has_disruption=false</code>. The API exposes relevant fields, but the exact encoding of a real reroute or replacement bus remains unvalidated.</li>
+    <li><code>prices.FIX</code> may be absent even when a journey remains <code>bookable=true</code>; consumers must preserve null/unavailable rather than treating it as zero.</li>
+    <li>Currency is rendered by the official UI as SEK/kr rather than repeated on each API price object.</li>
+  </ul>
+
+  <h2>6. Recommendation for Phase 2</h2>
+  <p>Proceed with the direct client as the primary acquisition method. Add conservative scheduling/backoff, schema-contract checks, explicit null handling, and occasional browser-based canary comparisons. Add a captured real disruption/replacement-transport fixture when one naturally appears. Retain headless browser derivation as a maintenance fallback only; existing/local Chrome control is not currently justified.</p>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# Local browser captures may contain cookies, tokens, and session material.
+.artifacts/
+*.har
+cookies*.json
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+site/
