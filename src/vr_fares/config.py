@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import time, timedelta
+from datetime import date, time, timedelta
 
 
 @dataclass(frozen=True)
@@ -28,11 +28,31 @@ class ScanConfig:
     retry_base_seconds: float = 0.6
 
 
+@dataclass(frozen=True)
+class LearningConfig:
+    start_date: date = date(2026, 8, 25)
+    end_date: date = date(2026, 9, 7)
+    schema_version: int = 1
+    lead_time_bins: tuple[tuple[str, int, int], ...] = (
+        ("0_2_days", 0, 2),
+        ("3_7_days", 3, 7),
+        ("8_14_days", 8, 14),
+        ("15_30_days", 15, 30),
+    )
+    minimum_successful_scans: int = 8
+    minimum_price_transitions: int = 10
+    four_times_daily_intraday_change_rate: float = 0.10
+    twice_daily_intraday_change_rate: float = 0.02
+    twice_daily_any_change_rate: float = 0.10
+
+
 POLICY = FarePolicyConfig()
 SCAN = ScanConfig(
     window_days={"7d": 7, "30d": 30},
     cache_ttls={"7d": timedelta(minutes=15), "30d": timedelta(hours=6)},
 )
+
+LEARNING = LearningConfig()
 
 PRICE_BANDS: tuple[tuple[str, int | None], ...] = (
     ("exceptional", 600),

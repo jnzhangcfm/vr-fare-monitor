@@ -1,9 +1,6 @@
 name: Refresh public 30d VR fares
 
 on:
-  schedule:
-    # Weekly Monday refresh, 05:43 UTC. Adjust this cron without changing scanner logic.
-    - cron: "43 5 * * 1"
   workflow_dispatch:
 
 permissions:

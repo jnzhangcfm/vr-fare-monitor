@@ -1,0 +1,89 @@
+name: Collect VR fare learning observations
+
+on:
+  schedule:
+    - cron: "11 6 * * *"
+      timezone: "Europe/Stockholm"
+    - cron: "17 12 * * *"
+      timezone: "Europe/Stockholm"
+    - cron: "23 18 * * *"
+      timezone: "Europe/Stockholm"
+    - cron: "29 23 * * *"
+      timezone: "Europe/Stockholm"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Run a controlled observation outside the configured learning period.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vr-fares-static-publication
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: source
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install scanner
+        run: python -m pip install ./source
+
+      - id: learning-period
+        name: Check configured learning period
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          from datetime import UTC, datetime
+          from vr_fares.learning import learning_is_active
+
+          print(f"active={'true' if learning_is_active(datetime.now(UTC)) else 'false'}")
+          PY
+
+      - name: Fetch existing Pages data
+        if: steps.learning-period.outputs.active == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force == 'true')
+        env:
+          PAGES_REPOSITORY: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+        run: |
+          if git ls-remote --exit-code --heads "$PAGES_REPOSITORY" gh-pages; then
+            git clone --depth 1 --branch gh-pages "$PAGES_REPOSITORY" site
+          else
+            mkdir site
+            git -C site init --initial-branch=gh-pages
+            git -C site remote add origin "$PAGES_REPOSITORY"
+          fi
+
+      - name: Collect one 30d observation and publish current state
+        if: steps.learning-period.outputs.active == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force == 'true')
+        env:
+          OBSERVATION_KEY: ${{ github.event.schedule || github.run_id }}
+          FORCE: ${{ inputs.force || 'false' }}
+        run: |
+          touch site/.nojekyll
+          args=(--learning --output-dir site --observation-key "$OBSERVATION_KEY")
+          if [ "$FORCE" = "true" ]; then
+            args+=(--force)
+          fi
+          python -m vr_fares.static_export "${args[@]}"
+
+      - name: Publish learning data
+        if: steps.learning-period.outputs.active == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force == 'true')
+        run: |
+          git -C site config user.name "github-actions[bot]"
+          git -C site config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C site add .nojekyll data history
+          if git -C site diff --cached --quiet; then
+            exit 0
+          fi
+          git -C site commit -m "Collect VR fare learning observation"
+          git -C site push origin gh-pages

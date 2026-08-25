@@ -1,9 +1,6 @@
 name: Refresh public 7d VR fares
 
 on:
-  schedule:
-    # Weekdays, 05:17 UTC. Adjust this cron without changing scanner logic.
-    - cron: "17 5 * * 1-5"
   workflow_dispatch:
 
 permissions:
