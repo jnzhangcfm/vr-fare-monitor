@@ -18,7 +18,7 @@ Once GitHub Pages is enabled, the public files are:
 - `/data/30d.json`
 - `/data/health.json`
 
-The base URL is `https://OWNER.github.io/REPOSITORY`. Every fare payload retains the existing source, journey, eligibility, combination, ranking, and Adult/Fix/SEK fields. Static publication adds only:
+The base URL is `https://OWNER.github.io/REPOSITORY`. Every fare payload retains the existing source, window, date status, ranking, and Adult/Fix/SEK fields. To keep the public response suitable for ChatGPT, per-date raw journeys and duplicate combination lists are replaced with counts; the complete ranked combinations remain in `ranking`. Static publication adds:
 
 ```json
 {

@@ -32,7 +32,13 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
     with tempfile.NamedTemporaryFile(
         "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
     ) as temporary:
-        json.dump(value, temporary, ensure_ascii=False, indent=2, sort_keys=True)
+        json.dump(
+            value,
+            temporary,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
         temporary.write("\n")
         temporary_path = Path(temporary.name)
     temporary_path.replace(path)
@@ -65,7 +71,7 @@ class StaticExporter:
             modes = {}
         try:
             service = self.service_factory()
-            payload = service.get_scan(mode)
+            payload = self._public_payload(service.get_scan(mode))
             payload["publication"] = {
                 "schema_version": 1,
                 "generated_at": generated_at,
@@ -101,6 +107,27 @@ class StaticExporter:
         }
         _write_json(health_path, health)
         return result
+
+    @staticmethod
+    def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        public_payload = dict(payload)
+        compact_dates = []
+        for entry in payload.get("dates", []):
+            journeys = entry.get("journeys", {})
+            compact_dates.append(
+                {
+                    "date": entry.get("date"),
+                    "status": entry.get("status"),
+                    "journey_counts": {
+                        "outbound": len(journeys.get("outbound", [])),
+                        "return": len(journeys.get("return", [])),
+                    },
+                    "valid_combination_count": len(entry.get("valid_combinations", [])),
+                    "recommended_combination_count": len(entry.get("recommended_combinations", [])),
+                }
+            )
+        public_payload["dates"] = compact_dates
+        return public_payload
 
     @staticmethod
     def _safe_error_code(error: Exception) -> str:

@@ -30,6 +30,24 @@ def scan_payload(mode: str) -> dict:
     }
 
 
+def populated_scan_payload(mode: str) -> dict:
+    payload = scan_payload(mode)
+    payload["dates"] = [
+        {
+            "date": "2026-08-26",
+            "status": "success",
+            "journeys": {
+                "outbound": [{"journey_id": "outbound-1"}],
+                "return": [{"journey_id": "return-1"}, {"journey_id": "return-2"}],
+            },
+            "valid_combinations": [{"id": "valid-1"}, {"id": "valid-2"}],
+            "recommended_combinations": [{"id": "recommended-1"}],
+        }
+    ]
+    payload["ranking"] = [{"global_rank": 1, "prices": {"total_sek": 498}}]
+    return payload
+
+
 class SuccessfulService:
     def get_scan(self, mode: str) -> dict:
         return scan_payload(mode)
@@ -38,6 +56,11 @@ class SuccessfulService:
 class FailingService:
     def get_scan(self, mode: str) -> dict:
         raise VRSourceUnavailable("vr_timeout")
+
+
+class PopulatedService:
+    def get_scan(self, mode: str) -> dict:
+        return populated_scan_payload(mode)
 
 
 def test_export_writes_public_data_and_health_metadata(tmp_path) -> None:
@@ -97,3 +120,24 @@ def test_failed_export_preserves_previous_data_and_records_safe_health(tmp_path)
         "last_error": {"code": "vr_timeout"},
         "data_path": "30d.json",
     }
+
+
+def test_export_publishes_rankings_and_compact_date_summaries(tmp_path) -> None:
+    exporter = StaticExporter(
+        service_factory=PopulatedService,
+        now=lambda: datetime(2026, 8, 25, 10, tzinfo=UTC),
+    )
+
+    exporter.export_mode("7d", tmp_path)
+
+    data = json.loads((tmp_path / "7d.json").read_text())
+    assert data["ranking"] == [{"global_rank": 1, "prices": {"total_sek": 498}}]
+    assert data["dates"] == [
+        {
+            "date": "2026-08-26",
+            "status": "success",
+            "journey_counts": {"outbound": 1, "return": 2},
+            "valid_combination_count": 2,
+            "recommended_combination_count": 1,
+        }
+    ]
