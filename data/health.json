@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-08-25T17:51:43.046235+00:00",
+  "modes": {
+    "7d": {
+      "data_available": true,
+      "data_path": "7d.json",
+      "last_attempt_at": "2026-08-25T17:51:43.046235+00:00",
+      "last_error": null,
+      "last_successful_refresh": "2026-08-25T17:51:43.152777+00:00",
+      "status": "healthy"
+    }
+  },
+  "overall_status": "healthy",
+  "schema_version": 1
+}
