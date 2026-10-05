@@ -35,9 +35,10 @@ The base URL is `https://OWNER.github.io/REPOSITORY`. Every fare payload retains
 
 ## Refresh frequency and 14-day learning period
 
-- The learning producer runs at **06:11, 12:17, 18:23, and 23:29 Europe/Stockholm** in [learning-refresh.yml](/Users/jnz/VR 火车票助手/.github/workflows/learning-refresh.yml). Its `timezone: Europe/Stockholm` schedule follows DST; no UTC conversion is hard-coded.
-- It runs from **2026-08-25 through 2026-09-07 inclusive**. The workflow checks the same centralized period guard before cloning Pages or contacting VR. After the end date, scheduled runs make no VR request and publish nothing.
-- Each active run makes one 30d scan, derives the equivalent 7d current output from that response, appends observations, writes `learning-summary.json`, and updates `health.json`.
+- The scheduled producer runs at **06:11, 12:17, 18:23, and 23:29 Europe/Stockholm** in `.github/workflows/learning-refresh.yml`. Its `timezone: Europe/Stockholm` schedule follows DST; no UTC conversion is hard-coded.
+- The fixed learning period ran from **2026-08-25 through 2026-09-07 inclusive**. During that window, each run made one 30d scan, derived the equivalent 7d current output, appended observations, updated `learning-summary.json`, and updated `health.json`.
+- After the learning period, the same four-times-daily schedule continues as the long-term fare monitor. Each run makes **one** 30d VR scan and derives 7d from the same response, so current `7d.json`, `30d.json`, and `health.json` stay fresh without doubling source traffic.
+- Post-learning monitoring does **not** append to the fixed learning history or recompute `learning-summary.json`; the completed 14-day learning result remains frozen. The learned recommendation was `four_times_daily`, matching the continuing schedule.
 
 The two legacy mode-specific workflows remain available only through manual dispatch. All workflows share one concurrency group, so competing runs cannot amplify VR traffic or race when writing `gh-pages`.
 
