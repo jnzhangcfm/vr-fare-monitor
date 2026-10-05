@@ -114,6 +114,112 @@ class StaticExporter:
         _write_json(health_path, health)
         return result
 
+    def export_current(self, output_dir: Path) -> dict[str, Any]:
+        """Refresh current 30d and derived 7d outputs with one VR scan.
+
+        This is the long-term monitoring path used after the fixed learning
+        period. It deliberately leaves learning history and learning-summary
+        unchanged.
+        """
+        generated_now = self.now().astimezone(UTC)
+        generated_at = generated_now.isoformat()
+        data_dir = output_dir / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        health_path = data_dir / "health.json"
+        existing_health = _load_json(health_path, {"schema_version": 1, "modes": {}})
+        modes = existing_health.get("modes")
+        if not isinstance(modes, dict):
+            modes = {}
+
+        try:
+            service = self.service_factory()
+            raw_30d = service.get_scan("30d")
+            scan_health = raw_30d.get("health")
+            if not isinstance(scan_health, dict) or scan_health.get("status") != "healthy":
+                raise VRSourceUnavailable(
+                    str(scan_health.get("status", "source_failure"))
+                    if isinstance(scan_health, dict)
+                    else "source_failure"
+                )
+
+            raw_7d = self._derive_7d(raw_30d)
+            for mode, raw_payload in (("30d", raw_30d), ("7d", raw_7d)):
+                payload = self._public_payload(raw_payload)
+                payload["publication"] = {
+                    "schema_version": 1,
+                    "generated_at": generated_at,
+                    "data_path": f"{mode}.json",
+                }
+                _write_json(data_dir / f"{mode}.json", payload)
+                payload_health = payload.get("health")
+                if not isinstance(payload_health, dict):
+                    payload_health = {}
+                modes[mode] = {
+                    "status": payload_health.get("status", "healthy"),
+                    "data_available": True,
+                    "last_attempt_at": generated_at,
+                    "last_successful_refresh": payload_health.get("last_successful_refresh"),
+                    "last_error": payload_health.get("last_error"),
+                    "data_path": f"{mode}.json",
+                }
+
+            health = {
+                **existing_health,
+                "schema_version": 1,
+                "generated_at": generated_at,
+                "overall_status": self._overall_status(modes),
+                "modes": modes,
+            }
+            learning = existing_health.get("learning")
+            if isinstance(learning, dict):
+                health["learning"] = {
+                    **learning,
+                    "active": learning_is_active(generated_now),
+                    "status": "healthy"
+                    if learning_is_active(generated_now)
+                    else "complete",
+                }
+            _write_json(health_path, health)
+            return {
+                "mode": "current",
+                "status": health["overall_status"],
+                "data_written": True,
+            }
+        except Exception as error:
+            error_code = self._safe_error_code(error)
+            for mode in ("30d", "7d"):
+                previous = modes.get(mode) if isinstance(modes.get(mode), dict) else {}
+                modes[mode] = {
+                    "status": "source_failure",
+                    "data_available": (data_dir / f"{mode}.json").exists(),
+                    "last_attempt_at": generated_at,
+                    "last_successful_refresh": previous.get("last_successful_refresh"),
+                    "last_error": {"code": error_code},
+                    "data_path": f"{mode}.json",
+                }
+            health = {
+                **existing_health,
+                "schema_version": 1,
+                "generated_at": generated_at,
+                "overall_status": "degraded",
+                "modes": modes,
+            }
+            learning = existing_health.get("learning")
+            if isinstance(learning, dict):
+                health["learning"] = {
+                    **learning,
+                    "active": learning_is_active(generated_now),
+                    "status": "healthy"
+                    if learning_is_active(generated_now)
+                    else "complete",
+                }
+            _write_json(health_path, health)
+            return {
+                "mode": "current",
+                "status": "source_failure",
+                "data_written": False,
+            }
+
     def export_learning(
         self, output_dir: Path, *, observation_key: str, force: bool = False
     ) -> dict[str, Any]:
@@ -356,16 +462,20 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Export static public VR fare JSON")
     parser.add_argument("--mode", choices=("7d", "30d"))
     parser.add_argument("--learning", action="store_true")
+    parser.add_argument("--current", action="store_true")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--observation-key", default="manual")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
-    if args.learning == (args.mode is not None):
-        parser.error("provide exactly one of --mode or --learning")
+    selected_modes = int(args.mode is not None) + int(args.learning) + int(args.current)
+    if selected_modes != 1:
+        parser.error("provide exactly one of --mode, --learning, or --current")
     if args.learning:
         result = StaticExporter().export_learning(
             args.output_dir, observation_key=args.observation_key, force=args.force
         )
+    elif args.current:
+        result = StaticExporter().export_current(args.output_dir)
     else:
         result = StaticExporter().export_mode(args.mode, args.output_dir)
     print(json.dumps(result, sort_keys=True))
