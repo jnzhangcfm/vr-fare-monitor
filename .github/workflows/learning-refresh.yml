@@ -1,4 +1,4 @@
-name: Collect VR fare learning observations
+name: Collect VR fare monitoring data
 
 on:
   schedule:
@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: Run a controlled observation outside the configured learning period.
+        description: Run a controlled learning observation outside the configured learning period.
         required: false
         default: false
         type: boolean
@@ -51,7 +51,6 @@ jobs:
           PY
 
       - name: Fetch existing Pages data
-        if: steps.learning-period.outputs.active == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force == 'true')
         env:
           PAGES_REPOSITORY: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
         run: |
@@ -63,27 +62,32 @@ jobs:
             git -C site remote add origin "$PAGES_REPOSITORY"
           fi
 
-      - name: Collect one 30d observation and publish current state
-        if: steps.learning-period.outputs.active == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force == 'true')
+      - name: Collect current fares and learning state
         env:
           OBSERVATION_KEY: ${{ github.event.schedule || github.run_id }}
           FORCE: ${{ inputs.force || 'false' }}
         run: |
           touch site/.nojekyll
-          args=(--learning --output-dir site --observation-key "$OBSERVATION_KEY")
-          if [ "$FORCE" = "true" ]; then
-            args+=(--force)
+          if [ "${{ steps.learning-period.outputs.active }}" = "true" ] || [ "$FORCE" = "true" ]; then
+            args=(--learning --output-dir site --observation-key "$OBSERVATION_KEY")
+            if [ "$FORCE" = "true" ]; then
+              args+=(--force)
+            fi
+            python -m vr_fares.static_export "${args[@]}"
+          else
+            python -m vr_fares.static_export --current --output-dir site
           fi
-          python -m vr_fares.static_export "${args[@]}"
 
-      - name: Publish learning data
-        if: steps.learning-period.outputs.active == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force == 'true')
+      - name: Publish monitoring data
         run: |
           git -C site config user.name "github-actions[bot]"
           git -C site config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C site add .nojekyll data history
+          git -C site add .nojekyll data
+          if [ -d site/history ]; then
+            git -C site add history
+          fi
           if git -C site diff --cached --quiet; then
             exit 0
           fi
-          git -C site commit -m "Collect VR fare learning observation"
+          git -C site commit -m "Refresh VR fare monitoring data"
           git -C site push origin gh-pages
