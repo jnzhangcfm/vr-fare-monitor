@@ -187,6 +187,49 @@ def test_export_publishes_rankings_and_compact_date_summaries(tmp_path) -> None:
     ]
 
 
+def test_current_export_after_learning_refreshes_both_windows_without_learning_history(
+    tmp_path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "learning-summary.json").write_text('{"frozen":true}\n')
+    (data_dir / "health.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "modes": {},
+                "learning": {
+                    "status": "healthy",
+                    "active": True,
+                    "successful_scan_count": 52,
+                    "failed_scan_count": 0,
+                },
+            }
+        )
+    )
+    exporter = StaticExporter(
+        service_factory=LearningService,
+        now=lambda: datetime(2026, 9, 9, 10, tzinfo=UTC),
+    )
+
+    result = exporter.export_current(tmp_path)
+
+    data_7d = json.loads((data_dir / "7d.json").read_text())
+    data_30d = json.loads((data_dir / "30d.json").read_text())
+    health = json.loads((data_dir / "health.json").read_text())
+
+    assert result == {"mode": "current", "status": "healthy", "data_written": True}
+    assert data_7d["mode"] == "7d"
+    assert data_30d["mode"] == "30d"
+    assert (data_dir / "learning-summary.json").read_text() == '{"frozen":true}\n'
+    assert not (tmp_path / "history").exists()
+    assert health["learning"]["active"] is False
+    assert health["learning"]["status"] == "complete"
+    assert health["learning"]["successful_scan_count"] == 52
+    assert health["modes"]["7d"]["status"] == "healthy"
+    assert health["modes"]["30d"]["status"] == "healthy"
+
+
 def test_learning_export_derives_7d_appends_history_and_updates_health(tmp_path) -> None:
     exporter = StaticExporter(
         service_factory=LearningService,
