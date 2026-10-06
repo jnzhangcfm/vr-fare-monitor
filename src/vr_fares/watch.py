@@ -13,6 +13,7 @@ WATCH_TARGETS: tuple[dict[str, Any], ...] = (
         "origin": "Göteborg C",
         "destination": "Stockholm C",
         "earliest_departure": None,
+        "latest_arrival_exclusive": None,
     },
     {
         "id": "stockholm-goteborg-2026-10-23",
@@ -21,6 +22,16 @@ WATCH_TARGETS: tuple[dict[str, Any], ...] = (
         "origin": "Stockholm C",
         "destination": "Göteborg C",
         "earliest_departure": "11:00",
+        "latest_arrival_exclusive": None,
+    },
+    {
+        "id": "goteborg-stockholm-2026-10-28",
+        "travel_date": "2026-10-28",
+        "direction": "outbound",
+        "origin": "Göteborg C",
+        "destination": "Stockholm C",
+        "earliest_departure": None,
+        "latest_arrival_exclusive": "18:00",
     },
 )
 
@@ -36,6 +47,19 @@ def _departure_is_allowed(value: Any, earliest: str | None) -> bool:
     except ValueError:
         return False
     return departure.timetz().replace(tzinfo=None) >= earliest_time
+
+
+def _arrival_is_allowed(value: Any, latest_exclusive: str | None) -> bool:
+    if not isinstance(value, str):
+        return False
+    if latest_exclusive is None:
+        return True
+    try:
+        arrival = datetime.fromisoformat(value)
+        latest_time = time.fromisoformat(latest_exclusive)
+    except ValueError:
+        return False
+    return arrival.timetz().replace(tzinfo=None) < latest_time
 
 
 def _compact_match(journey: dict[str, Any]) -> dict[str, Any] | None:
@@ -86,7 +110,11 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
                 if journey.get("available") is not True or journey.get("bookable") is not True:
                     continue
                 if not _departure_is_allowed(
-                    journey.get("departure_at"), target["earliest_departure"]
+                    journey.get("departure_at"), target.get("earliest_departure")
+                ):
+                    continue
+                if not _arrival_is_allowed(
+                    journey.get("arrival_at"), target.get("latest_arrival_exclusive")
                 ):
                     continue
                 compact = _compact_match(journey)
@@ -130,7 +158,7 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
         "source": "official_vr_api",
         "currency": "SEK",
         "price_threshold_sek": PRICE_THRESHOLD_SEK,
-        "expires_after": "2026-10-23",
+        "expires_after": "2026-10-28",
         "has_alerts": bool(alerts),
         "alert_count": len(alerts),
         "targets": targets,
