@@ -18,8 +18,9 @@ Once GitHub Pages is enabled, the public files are:
 - `/data/30d.json`
 - `/data/health.json`
 - `/data/learning-summary.json`
+- `/data/watch.json` — targeted alert feed for the October 2026 Göteborg/Stockholm trips
 
-The base URL is `https://OWNER.github.io/REPOSITORY`. Every fare payload retains the existing source, window, date status, ranking, and Adult/Fix/SEK fields. To keep the public response suitable for ChatGPT, per-date raw journeys and duplicate combination lists are replaced with counts; the complete ranked combinations remain in `ranking`. Static publication adds:
+The base URL is `https://OWNER.github.io/REPOSITORY`. `watch.json` currently tracks 2026-10-19 Göteborg C → Stockholm C at any departure time and 2026-10-23 Stockholm C → Göteborg C for departures at or after 11:00, publishing only available/bookable Adult Fix fares strictly below 500 SEK. Every fare payload retains the existing source, window, date status, ranking, and Adult/Fix/SEK fields. To keep the public response suitable for ChatGPT, per-date raw journeys and duplicate combination lists are replaced with counts; the complete ranked combinations remain in `ranking`. Static publication adds:
 
 ```json
 {
