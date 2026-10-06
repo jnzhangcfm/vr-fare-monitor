@@ -16,6 +16,7 @@ from vr_fares.policy import rank_globally
 from vr_fares.service import ScanService, VRSourceUnavailable
 from vr_fares.storage import InMemoryStore
 from vr_fares.vr_client import VRClient
+from vr_fares.watch import build_watch_payload
 
 
 def _utc_now() -> datetime:
@@ -143,6 +144,10 @@ class StaticExporter:
                 )
 
             raw_7d = self._derive_7d(raw_30d)
+            _write_json(
+                data_dir / "watch.json",
+                build_watch_payload(raw_30d, generated_at=generated_at),
+            )
             for mode, raw_payload in (("30d", raw_30d), ("7d", raw_7d)):
                 payload = self._public_payload(raw_payload)
                 payload["publication"] = {
