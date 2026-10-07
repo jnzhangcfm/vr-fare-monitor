@@ -14,6 +14,13 @@ WATCH_TARGETS: tuple[dict[str, Any], ...] = (
         "destination": "Stockholm C",
         "earliest_departure": None,
         "latest_arrival_exclusive": None,
+        "strategy": "tiered_arrival",
+        "preferred_arrival_start": "10:30",
+        "preferred_arrival_end": "13:30",
+        "backup_arrival_start": "09:30",
+        "backup_arrival_end": "15:00",
+        "outside_window_bargain_threshold_sek": 300,
+        "stop_loss_date": "2026-10-17",
     },
     {
         "id": "stockholm-goteborg-2026-10-23",
@@ -23,6 +30,7 @@ WATCH_TARGETS: tuple[dict[str, Any], ...] = (
         "destination": "Göteborg C",
         "earliest_departure": "11:00",
         "latest_arrival_exclusive": None,
+        "strategy": "standard",
     },
     {
         "id": "goteborg-stockholm-2026-10-28",
@@ -32,34 +40,43 @@ WATCH_TARGETS: tuple[dict[str, Any], ...] = (
         "destination": "Stockholm C",
         "earliest_departure": None,
         "latest_arrival_exclusive": "18:00",
+        "strategy": "standard",
     },
 )
 
 
-def _departure_is_allowed(value: Any, earliest: str | None) -> bool:
+def _parse_local_clock(value: Any) -> time | None:
     if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value).timetz().replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _departure_is_allowed(value: Any, earliest: str | None) -> bool:
+    local_clock = _parse_local_clock(value)
+    if local_clock is None:
         return False
     if earliest is None:
         return True
-    try:
-        departure = datetime.fromisoformat(value)
-        earliest_time = time.fromisoformat(earliest)
-    except ValueError:
-        return False
-    return departure.timetz().replace(tzinfo=None) >= earliest_time
+    return local_clock >= time.fromisoformat(earliest)
 
 
 def _arrival_is_allowed(value: Any, latest_exclusive: str | None) -> bool:
-    if not isinstance(value, str):
+    local_clock = _parse_local_clock(value)
+    if local_clock is None:
         return False
     if latest_exclusive is None:
         return True
-    try:
-        arrival = datetime.fromisoformat(value)
-        latest_time = time.fromisoformat(latest_exclusive)
-    except ValueError:
+    return local_clock < time.fromisoformat(latest_exclusive)
+
+
+def _clock_in_window(value: Any, start: str, end: str) -> bool:
+    local_clock = _parse_local_clock(value)
+    if local_clock is None:
         return False
-    return arrival.timetz().replace(tzinfo=None) < latest_time
+    return time.fromisoformat(start) <= local_clock <= time.fromisoformat(end)
 
 
 def _compact_match(journey: dict[str, Any]) -> dict[str, Any] | None:
@@ -80,6 +97,28 @@ def _compact_match(journey: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _tiered_october_19(
+    target: dict[str, Any], compact: dict[str, Any]
+) -> tuple[bool, str | None]:
+    price = compact["fix_price_sek"]
+    arrival = compact.get("arrival_at")
+
+    if price < PRICE_THRESHOLD_SEK and _clock_in_window(
+        arrival, target["preferred_arrival_start"], target["preferred_arrival_end"]
+    ):
+        return True, "preferred"
+
+    if price < PRICE_THRESHOLD_SEK and _clock_in_window(
+        arrival, target["backup_arrival_start"], target["backup_arrival_end"]
+    ):
+        return True, "backup"
+
+    if price < target["outside_window_bargain_threshold_sek"]:
+        return True, "bargain"
+
+    return False, None
+
+
 def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[str, Any]:
     dates = {
         entry.get("date"): entry
@@ -92,6 +131,8 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
     for target in WATCH_TARGETS:
         entry = dates.get(target["travel_date"])
         matches: list[dict[str, Any]] = []
+        stop_loss_candidates: list[dict[str, Any]] = []
+
         if not isinstance(entry, dict):
             status = "date_not_scanned"
         elif entry.get("status") == "source_failure":
@@ -117,12 +158,41 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
                     journey.get("arrival_at"), target.get("latest_arrival_exclusive")
                 ):
                     continue
+
                 compact = _compact_match(journey)
-                if compact is None or compact["fix_price_sek"] >= PRICE_THRESHOLD_SEK:
+                if compact is None:
                     continue
+
+                if target.get("strategy") == "tiered_arrival":
+                    if _clock_in_window(
+                        compact.get("arrival_at"),
+                        target["backup_arrival_start"],
+                        target["backup_arrival_end"],
+                    ):
+                        stop_loss_candidates.append(compact)
+
+                    should_alert, tier = _tiered_october_19(target, compact)
+                    if not should_alert:
+                        continue
+                    compact = {**compact, "alert_tier": tier}
+                else:
+                    if compact["fix_price_sek"] >= PRICE_THRESHOLD_SEK:
+                        continue
+                    compact = {**compact, "alert_tier": "standard"}
+
                 matches.append(compact)
 
-            matches.sort(key=lambda item: (item["fix_price_sek"], item["departure_at"] or ""))
+            tier_order = {"preferred": 0, "backup": 1, "bargain": 2, "standard": 0}
+            matches.sort(
+                key=lambda item: (
+                    tier_order.get(item.get("alert_tier"), 9),
+                    item["fix_price_sek"],
+                    item["departure_at"] or "",
+                )
+            )
+            stop_loss_candidates.sort(
+                key=lambda item: (item["fix_price_sek"], item["arrival_at"] or "")
+            )
             status = "match_found" if matches else "no_match"
 
         target_result = {
@@ -130,9 +200,18 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
             "price_rule": f"< {PRICE_THRESHOLD_SEK} SEK",
             "status": status,
             "match_count": len(matches),
-            "best_price_sek": matches[0]["fix_price_sek"] if matches else None,
+            "best_price_sek": min(
+                (item["fix_price_sek"] for item in matches), default=None
+            ),
             "matches": matches,
         }
+
+        if target.get("strategy") == "tiered_arrival":
+            target_result["stop_loss_candidates"] = stop_loss_candidates[:3]
+            target_result["best_stop_loss_candidate"] = (
+                stop_loss_candidates[0] if stop_loss_candidates else None
+            )
+
         targets.append(target_result)
         alerts.extend(
             {
@@ -148,12 +227,15 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
     alerts.sort(
         key=lambda item: (
             item["travel_date"],
+            {"preferred": 0, "backup": 1, "bargain": 2, "standard": 0}.get(
+                item.get("alert_tier"), 9
+            ),
             item["fix_price_sek"],
             item["departure_at"] or "",
         )
     )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": generated_at,
         "source": "official_vr_api",
         "currency": "SEK",
