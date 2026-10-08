@@ -13,13 +13,9 @@ WATCH_TARGETS: tuple[dict[str, Any], ...] = (
         "origin": "Göteborg C",
         "destination": "Stockholm C",
         "earliest_departure": None,
+        "latest_arrival_inclusive": "16:10",
         "latest_arrival_exclusive": None,
-        "strategy": "tiered_arrival",
-        "preferred_arrival_start": "10:30",
-        "preferred_arrival_end": "13:30",
-        "backup_arrival_start": "09:30",
-        "backup_arrival_end": "15:00",
-        "outside_window_bargain_threshold_sek": 300,
+        "strategy": "standard",
         "stop_loss_date": "2026-10-17",
     },
     {
@@ -63,10 +59,16 @@ def _departure_is_allowed(value: Any, earliest: str | None) -> bool:
     return local_clock >= time.fromisoformat(earliest)
 
 
-def _arrival_is_allowed(value: Any, latest_exclusive: str | None) -> bool:
+def _arrival_is_allowed(
+    value: Any,
+    latest_exclusive: str | None,
+    latest_inclusive: str | None = None,
+) -> bool:
     local_clock = _parse_local_clock(value)
     if local_clock is None:
         return False
+    if latest_inclusive is not None:
+        return local_clock <= time.fromisoformat(latest_inclusive)
     if latest_exclusive is None:
         return True
     return local_clock < time.fromisoformat(latest_exclusive)
@@ -95,28 +97,6 @@ def _compact_match(journey: dict[str, Any]) -> dict[str, Any] | None:
         "seats_left": journey.get("seats_left"),
         "schedule_references": journey.get("schedule_references", []),
     }
-
-
-def _tiered_october_19(
-    target: dict[str, Any], compact: dict[str, Any]
-) -> tuple[bool, str | None]:
-    price = compact["fix_price_sek"]
-    arrival = compact.get("arrival_at")
-
-    if price < PRICE_THRESHOLD_SEK and _clock_in_window(
-        arrival, target["preferred_arrival_start"], target["preferred_arrival_end"]
-    ):
-        return True, "preferred"
-
-    if price < PRICE_THRESHOLD_SEK and _clock_in_window(
-        arrival, target["backup_arrival_start"], target["backup_arrival_end"]
-    ):
-        return True, "backup"
-
-    if price < target["outside_window_bargain_threshold_sek"]:
-        return True, "bargain"
-
-    return False, None
 
 
 def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[str, Any]:
@@ -155,7 +135,9 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
                 ):
                     continue
                 if not _arrival_is_allowed(
-                    journey.get("arrival_at"), target.get("latest_arrival_exclusive")
+                    journey.get("arrival_at"),
+                    target.get("latest_arrival_exclusive"),
+                    target.get("latest_arrival_inclusive"),
                 ):
                     continue
 
@@ -163,22 +145,12 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
                 if compact is None:
                     continue
 
-                if target.get("strategy") == "tiered_arrival":
-                    if _clock_in_window(
-                        compact.get("arrival_at"),
-                        target["backup_arrival_start"],
-                        target["backup_arrival_end"],
-                    ):
-                        stop_loss_candidates.append(compact)
+                if target["id"] == "goteborg-stockholm-2026-10-19":
+                    stop_loss_candidates.append(compact)
 
-                    should_alert, tier = _tiered_october_19(target, compact)
-                    if not should_alert:
-                        continue
-                    compact = {**compact, "alert_tier": tier}
-                else:
-                    if compact["fix_price_sek"] >= PRICE_THRESHOLD_SEK:
-                        continue
-                    compact = {**compact, "alert_tier": "standard"}
+                if compact["fix_price_sek"] >= PRICE_THRESHOLD_SEK:
+                    continue
+                compact = {**compact, "alert_tier": "standard"}
 
                 matches.append(compact)
 
@@ -206,7 +178,7 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
             "matches": matches,
         }
 
-        if target.get("strategy") == "tiered_arrival":
+        if target["id"] == "goteborg-stockholm-2026-10-19":
             target_result["stop_loss_candidates"] = stop_loss_candidates[:3]
             target_result["best_stop_loss_candidate"] = (
                 stop_loss_candidates[0] if stop_loss_candidates else None
