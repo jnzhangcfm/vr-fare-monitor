@@ -22,7 +22,7 @@ def journey(
     }
 
 
-def test_watch_uses_tiered_october_19_strategy_and_exact_cutoffs() -> None:
+def test_watch_uses_october_19_1610_arrival_cutoff_and_other_exact_cutoffs() -> None:
     raw_scan = {
         "dates": [
             {
@@ -36,19 +36,14 @@ def test_watch_uses_tiered_october_19_strategy_and_exact_cutoffs() -> None:
                             arrival_at="2026-10-19T09:00:00+02:00",
                         ),
                         journey(
-                            "2026-10-19T06:30:00+02:00",
-                            250,
-                            arrival_at="2026-10-19T09:15:00+02:00",
-                        ),
-                        journey(
-                            "2026-10-19T07:00:00+02:00",
-                            480,
-                            arrival_at="2026-10-19T10:00:00+02:00",
-                        ),
-                        journey(
-                            "2026-10-19T08:00:00+02:00",
+                            "2026-10-19T10:30:00+02:00",
                             499,
-                            arrival_at="2026-10-19T11:30:00+02:00",
+                            arrival_at="2026-10-19T16:10:00+02:00",
+                        ),
+                        journey(
+                            "2026-10-19T10:31:00+02:00",
+                            399,
+                            arrival_at="2026-10-19T16:11:00+02:00",
                         ),
                         journey(
                             "2026-10-19T09:00:00+02:00",
@@ -99,14 +94,11 @@ def test_watch_uses_tiered_october_19_strategy_and_exact_cutoffs() -> None:
     october_19, october_23, october_28 = payload["targets"]
 
     assert payload["schema_version"] == 2
-    assert october_19["match_count"] == 3
-    assert [item["alert_tier"] for item in october_19["matches"]] == [
-        "preferred",
-        "backup",
-        "bargain",
-    ]
-    assert [item["fix_price_sek"] for item in october_19["matches"]] == [499, 480, 250]
-    assert october_19["best_stop_loss_candidate"]["fix_price_sek"] == 480
+    assert october_19["latest_arrival_inclusive"] == "16:10"
+    assert october_19["match_count"] == 2
+    assert [item["fix_price_sek"] for item in october_19["matches"]] == [450, 499]
+    assert all(item["arrival_at"][11:16] <= "16:10" for item in october_19["matches"])
+    assert october_19["best_stop_loss_candidate"]["fix_price_sek"] == 450
     assert october_19["stop_loss_date"] == "2026-10-17"
 
     assert october_23["match_count"] == 2
