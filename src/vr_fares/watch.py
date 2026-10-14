@@ -19,16 +19,6 @@ WATCH_TARGETS: tuple[dict[str, Any], ...] = (
         "stop_loss_date": "2026-10-17",
     },
     {
-        "id": "stockholm-goteborg-2026-10-23",
-        "travel_date": "2026-10-23",
-        "direction": "return",
-        "origin": "Stockholm C",
-        "destination": "Göteborg C",
-        "earliest_departure": "11:00",
-        "latest_arrival_exclusive": None,
-        "strategy": "standard",
-    },
-    {
         "id": "goteborg-stockholm-2026-10-28",
         "travel_date": "2026-10-28",
         "direction": "outbound",
