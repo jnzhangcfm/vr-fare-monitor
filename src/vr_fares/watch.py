@@ -7,18 +7,6 @@ PRICE_THRESHOLD_SEK = 500
 
 WATCH_TARGETS: tuple[dict[str, Any], ...] = (
     {
-        "id": "goteborg-stockholm-2026-10-19",
-        "travel_date": "2026-10-19",
-        "direction": "outbound",
-        "origin": "Göteborg C",
-        "destination": "Stockholm C",
-        "earliest_departure": None,
-        "latest_arrival_inclusive": "16:10",
-        "latest_arrival_exclusive": None,
-        "strategy": "standard",
-        "stop_loss_date": "2026-10-17",
-    },
-    {
         "id": "goteborg-stockholm-2026-10-28",
         "travel_date": "2026-10-28",
         "direction": "outbound",
@@ -101,7 +89,6 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
     for target in WATCH_TARGETS:
         entry = dates.get(target["travel_date"])
         matches: list[dict[str, Any]] = []
-        stop_loss_candidates: list[dict[str, Any]] = []
 
         if not isinstance(entry, dict):
             status = "date_not_scanned"
@@ -135,9 +122,6 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
                 if compact is None:
                     continue
 
-                if target["id"] == "goteborg-stockholm-2026-10-19":
-                    stop_loss_candidates.append(compact)
-
                 if compact["fix_price_sek"] >= PRICE_THRESHOLD_SEK:
                     continue
                 compact = {**compact, "alert_tier": "standard"}
@@ -152,9 +136,6 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
                     item["departure_at"] or "",
                 )
             )
-            stop_loss_candidates.sort(
-                key=lambda item: (item["fix_price_sek"], item["arrival_at"] or "")
-            )
             status = "match_found" if matches else "no_match"
 
         target_result = {
@@ -167,12 +148,6 @@ def build_watch_payload(raw_scan: dict[str, Any], *, generated_at: str) -> dict[
             ),
             "matches": matches,
         }
-
-        if target["id"] == "goteborg-stockholm-2026-10-19":
-            target_result["stop_loss_candidates"] = stop_loss_candidates[:3]
-            target_result["best_stop_loss_candidate"] = (
-                stop_loss_candidates[0] if stop_loss_candidates else None
-            )
 
         targets.append(target_result)
         alerts.extend(
