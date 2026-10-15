@@ -22,7 +22,7 @@ def journey(
     }
 
 
-def test_watch_uses_october_19_and_28_exact_arrival_cutoffs() -> None:
+def test_watch_tracks_only_october_28_with_exclusive_arrival_cutoff() -> None:
     raw_scan = {
         "dates": [
             {
@@ -78,17 +78,13 @@ def test_watch_uses_october_19_and_28_exact_arrival_cutoffs() -> None:
 
     payload = build_watch_payload(raw_scan, generated_at="2026-10-07T00:00:00+00:00")
 
-    october_19, october_28 = payload["targets"]
-
     assert payload["schema_version"] == 2
-    assert len(payload["targets"]) == 2
-    assert all(target["travel_date"] != "2026-10-23" for target in payload["targets"])
-    assert october_19["latest_arrival_inclusive"] == "16:10"
-    assert october_19["match_count"] == 2
-    assert [item["fix_price_sek"] for item in october_19["matches"]] == [450, 499]
-    assert all(item["arrival_at"][11:16] <= "16:10" for item in october_19["matches"])
-    assert october_19["best_stop_loss_candidate"]["fix_price_sek"] == 450
-    assert october_19["stop_loss_date"] == "2026-10-17"
-
+    assert len(payload["targets"]) == 1
+    october_28 = payload["targets"][0]
+    assert october_28["travel_date"] == "2026-10-28"
+    assert october_28["latest_arrival_exclusive"] == "18:00"
     assert october_28["match_count"] == 1
+    assert october_28["best_price_sek"] == 499
     assert october_28["matches"][0]["arrival_at"] == "2026-10-28T17:59:00+01:00"
+    assert len(payload["alerts"]) == 1
+    assert all(item["travel_date"] == "2026-10-28" for item in payload["alerts"])
